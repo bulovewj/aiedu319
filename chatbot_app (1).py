@@ -1,5 +1,10 @@
 import streamlit as st
-import anthropic
+
+try:
+    import anthropic
+except ImportError:
+    st.error("❌ anthropic 패키지가 설치되지 않았습니다. requirements.txt를 확인해주세요.")
+    st.stop()
 
 # ── 페이지 설정 ──────────────────────────────────────────────
 st.set_page_config(
@@ -44,12 +49,11 @@ if "messages" not in st.session_state:
 if "api_key" not in st.session_state:
     st.session_state.api_key = ""
 
+if "user_input_prefill" not in st.session_state:
+    st.session_state.user_input_prefill = ""
+
 # ── 사이드바 ──────────────────────────────────────────────────
 with st.sidebar:
-    st.image(
-        "https://img.icons8.com/emoji/96/telescope-emoji.png",
-        width=80,
-    )
     st.title("🔭 궤도 챗봇 설정")
     st.markdown("---")
 
@@ -67,7 +71,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 🧪 사용 모델")
-    st.code("claude-sonnet-4-6", language=None)
+    st.code("claude-sonnet-4-5", language=None)
 
     st.markdown("### 🎙️ 챗봇 소개")
     st.markdown(
@@ -115,10 +119,6 @@ example_questions = [
     "💡 빛의 속도는 왜 한계인가요?",
 ]
 
-# 버튼 클릭 시 해당 질문을 입력창에 자동 입력
-if "user_input_prefill" not in st.session_state:
-    st.session_state.user_input_prefill = ""
-
 for i, q in enumerate(example_questions):
     with example_cols[i % 3]:
         if st.button(q, use_container_width=True, key=f"ex_{i}"):
@@ -127,24 +127,19 @@ for i, q in enumerate(example_questions):
 st.markdown("---")
 
 # ── 대화 기록 출력 ────────────────────────────────────────────
-chat_container = st.container()
-with chat_container:
-    if not st.session_state.messages:
-        st.info("👆 위의 예시 질문을 클릭하거나, 아래에 직접 질문을 입력해보세요!")
-    else:
-        for msg in st.session_state.messages:
-            if msg["role"] == "user":
-                with st.chat_message("user", avatar="🙋"):
-                    st.markdown(msg["content"])
-            else:
-                with st.chat_message("assistant", avatar="🔭"):
-                    st.markdown(msg["content"])
+if not st.session_state.messages:
+    st.info("👆 위의 예시 질문을 클릭하거나, 아래에 직접 질문을 입력해보세요!")
+else:
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            with st.chat_message("user", avatar="🙋"):
+                st.markdown(msg["content"])
+        else:
+            with st.chat_message("assistant", avatar="🔭"):
+                st.markdown(msg["content"])
 
 # ── 사용자 입력 처리 ──────────────────────────────────────────
-user_input = st.chat_input(
-    "궤도에게 과학 질문을 해보세요! 🚀",
-    key="chat_input",
-)
+user_input = st.chat_input("궤도에게 과학 질문을 해보세요! 🚀")
 
 # 예시 버튼 클릭 처리
 if st.session_state.user_input_prefill and not user_input:
@@ -153,7 +148,6 @@ if st.session_state.user_input_prefill and not user_input:
 
 # ── API 호출 및 응답 생성 ─────────────────────────────────────
 if user_input:
-    # API 키 확인
     if not st.session_state.api_key:
         st.warning("⚠️ 사이드바에서 Anthropic API 키를 먼저 입력해주세요!")
         st.stop()
@@ -165,50 +159,50 @@ if user_input:
 
     # 어시스턴트 응답 생성
     with st.chat_message("assistant", avatar="🔭"):
-        with st.spinner("궤도가 열심히 생각하는 중이에요... 🤔💭"):
-            try:
-                client = anthropic.Anthropic(api_key=st.session_state.api_key)
+        response_placeholder = st.empty()
+        full_response = ""
 
-                # 스트리밍 응답
-                response_placeholder = st.empty()
-                full_response = ""
+        try:
+            client = anthropic.Anthropic(api_key=st.session_state.api_key)
 
-                with client.messages.stream(
-                    model="claude-sonnet-4-5",
-                    max_tokens=1500,
-                    system=SYSTEM_PROMPT,
-                    messages=[
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state.messages
-                    ],
-                ) as stream:
-                    for text_chunk in stream.text_stream:
-                        full_response += text_chunk
-                        response_placeholder.markdown(full_response + "▌")
+            with client.messages.stream(
+                model="claude-sonnet-4-5",
+                max_tokens=1500,
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages
+                ],
+            ) as stream:
+                for text_chunk in stream.text_stream:
+                    full_response += text_chunk
+                    response_placeholder.markdown(full_response + "▌")
 
-                # 커서 제거 후 최종 출력
-                response_placeholder.markdown(full_response)
+            response_placeholder.markdown(full_response)
 
-                # 대화 기록에 저장
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": full_response}
-                )
+            st.session_state.messages.append(
+                {"role": "assistant", "content": full_response}
+            )
 
-            except anthropic.AuthenticationError:
-                st.error("❌ API 키가 올바르지 않습니다. 다시 확인해주세요.")
-                st.session_state.messages.pop()  # 실패한 사용자 메시지 제거
+        except anthropic.AuthenticationError:
+            response_placeholder.empty()
+            st.error("❌ API 키가 올바르지 않습니다. 다시 확인해주세요.")
+            st.session_state.messages.pop()
 
-            except anthropic.RateLimitError:
-                st.error("⚠️ API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.")
-                st.session_state.messages.pop()
+        except anthropic.RateLimitError:
+            response_placeholder.empty()
+            st.error("⚠️ API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.")
+            st.session_state.messages.pop()
 
-            except anthropic.APIConnectionError:
-                st.error("🌐 네트워크 연결 오류입니다. 인터넷 연결을 확인해주세요.")
-                st.session_state.messages.pop()
+        except anthropic.APIConnectionError:
+            response_placeholder.empty()
+            st.error("🌐 네트워크 연결 오류입니다. 인터넷 연결을 확인해주세요.")
+            st.session_state.messages.pop()
 
-            except Exception as e:
-                st.error(f"🚨 예상치 못한 오류가 발생했습니다: {e}")
-                st.session_state.messages.pop()
+        except Exception as e:
+            response_placeholder.empty()
+            st.error(f"🚨 오류가 발생했습니다: {str(e)}")
+            st.session_state.messages.pop()
 
 # ── 하단 정보 ─────────────────────────────────────────────────
 st.markdown("---")
